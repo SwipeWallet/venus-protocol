@@ -67,6 +67,11 @@ contract VAIController is VAIControllerStorageG2, VAIControllerErrorReporter, Ex
      */
     event MintFee(address minter, uint feeAmount);
 
+    /**
+     * @notice Emitted when set vai mint capped Amount
+     */
+    event SetMintCappedAmount(address admin, uint256 oldVaiMintCappedAmount, uint256 newVaiMintCappedAmount);
+
     /*** Main Actions ***/
     struct MintLocalVars {
         Error err;
@@ -74,10 +79,37 @@ contract VAIController is VAIControllerStorageG2, VAIControllerErrorReporter, Ex
         uint mintAmount;
     }
 
+    /**
+     * @notice Set vai mint capped amount
+     */
+    function setMintCappedAmount(uint newMintCappedAmount) public returns (uint) {
+        // Check caller is admin
+        if (!(msg.sender == admin)) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SET_VAI_MINT_CAPPED_CHECK);
+        }
+        uint originalMintCappedAmount = mintCappedAmount;
+        // Set new vai mint capped amount
+        mintCappedAmount = newMintCappedAmount;
+        // Emit the event
+        emit SetMintCappedAmount(msg.sender, originalMintCappedAmount, newMintCappedAmount);
+
+        return uint(Error.NO_ERROR);
+    }
+
     function mintVAI(uint mintVAIAmount) external nonReentrant returns (uint) {
         if(address(comptroller) != address(0)) {
+            MathError mErr;
+            uint sumVaiMintAmount;
+
             require(mintVAIAmount > 0, "mintVAIAmount cannt be zero");
 
+            // Check vai mint capped
+            if (mintCappedAmount != 0) {
+                uint vaiTotalAmount = VAI(getVAIAddress()).totalSupply();
+                (mErr, sumVaiMintAmount) = addUInt(vaiTotalAmount, mintVAIAmount);
+                require(mErr == MathError.NO_ERROR, "SUM_VAI_MINT_AMOUNT_CALCULATION_FAILED");
+                require(mintCappedAmount >= sumVaiMintAmount, "vai mint amount over capped");
+            }
             require(!ComptrollerImplInterface(address(comptroller)).protocolPaused(), "protocol is paused");
 
             MintLocalVars memory vars;
@@ -89,7 +121,6 @@ contract VAIController is VAIControllerStorageG2, VAIControllerErrorReporter, Ex
             ComptrollerImplInterface(address(comptroller)).distributeVAIMinterVenus(minter);
 
             uint oErr;
-            MathError mErr;
             uint accountMintVAINew;
             uint accountMintableVAI;
 
